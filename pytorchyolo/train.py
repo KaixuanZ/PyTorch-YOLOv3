@@ -17,7 +17,7 @@ from pytorchyolo.utils.datasets import ListDataset
 from pytorchyolo.utils.augmentations import AUGMENTATION_TRANSFORMS
 #from pytorchyolo.utils.transforms import DEFAULT_TRANSFORMS
 from pytorchyolo.utils.parse_config import parse_data_config
-from pytorchyolo.utils.loss import compute_loss
+from pytorchyolo.utils.loss import compute_loss, my_loss
 from pytorchyolo.test import _evaluate, _create_validation_data_loader
 
 from terminaltables import AsciiTable
@@ -62,9 +62,9 @@ def run():
     parser = argparse.ArgumentParser(description="Trains the YOLO model.")
     parser.add_argument("-m", "--model", type=str, default="config/yolov3.cfg", help="Path to model definition file (.cfg)")
     parser.add_argument("-d", "--data", type=str, default="config/coco.data", help="Path to data config file (.data)")
-    parser.add_argument("-e", "--epochs", type=int, default=300, help="Number of epochs")
+    parser.add_argument("-e", "--epochs", type=int, default=5, help="Number of epochs")
     parser.add_argument("-v", "--verbose", action='store_true', help="Makes the training more verbose")
-    parser.add_argument("--n_cpu", type=int, default=8, help="Number of cpu threads to use during batch generation")
+    parser.add_argument("--n_cpu", type=int, default=1, help="Number of cpu threads to use during batch generation")
     parser.add_argument("--pretrained_weights", type=str, help="Path to checkpoint file (.weights or .pth). Starts training from checkpoint model")
     parser.add_argument("--checkpoint_interval", type=int, default=1, help="Interval of epochs between saving model weights")
     parser.add_argument("--evaluation_interval", type=int, default=1, help="Interval of epochs between evaluations on validation set")
@@ -161,8 +161,14 @@ def run():
             targets = targets.to(device)
 
             outputs = model(imgs)
-
-            loss, loss_components = compute_loss(outputs, targets, model)
+            if 'SD-simple' in args.model:
+                loss, loss_components = my_loss(outputs, targets)
+                print('iter:',epoch)
+                print('loss:',loss.item())
+                print('loss components:',loss_components)
+            else:
+                import pdb; pdb.set_trace()
+                loss, loss_components = compute_loss(outputs, targets, model)
 
             loss.backward()
 
@@ -222,37 +228,37 @@ def run():
         # #############
 
         # Save model to checkpoint file
-        if epoch % args.checkpoint_interval == 0:
-            checkpoint_path = f"checkpoints/yolov3_ckpt_{epoch}.pth"
-            print(f"---- Saving checkpoint to: '{checkpoint_path}' ----")
-            torch.save(model.state_dict(), checkpoint_path)
+        # if epoch % args.checkpoint_interval == 0:
+        #     checkpoint_path = f"checkpoints/yolov3_ckpt_{epoch}.pth"
+        #     print(f"---- Saving checkpoint to: '{checkpoint_path}' ----")
+        #     torch.save(model.state_dict(), checkpoint_path)
 
         # ########
         # Evaluate
         # ########
 
-        if epoch % args.evaluation_interval == 0:
-            print("\n---- Evaluating Model ----")
-            # Evaluate the model on the validation set
-            metrics_output = _evaluate(
-                model,
-                validation_dataloader,
-                class_names,
-                img_size=model.hyperparams['height'],
-                iou_thres=args.iou_thres,
-                conf_thres=args.conf_thres,
-                nms_thres=args.nms_thres,
-                verbose=args.verbose
-            )
-
-            if metrics_output is not None:
-                precision, recall, AP, f1, ap_class = metrics_output
-                evaluation_metrics = [
-                    ("validation/precision", precision.mean()),
-                    ("validation/recall", recall.mean()),
-                    ("validation/mAP", AP.mean()),
-                    ("validation/f1", f1.mean())]
-                logger.list_of_scalars_summary(evaluation_metrics, epoch)
+        # if epoch % args.evaluation_interval == 0:
+        #     print("\n---- Evaluating Model ----")
+        #     # Evaluate the model on the validation set
+        #     metrics_output = _evaluate(
+        #         model,
+        #         validation_dataloader,
+        #         class_names,
+        #         img_size=model.hyperparams['height'],
+        #         iou_thres=args.iou_thres,
+        #         conf_thres=args.conf_thres,
+        #         nms_thres=args.nms_thres,
+        #         verbose=args.verbose
+        #     )
+        #
+        #     if metrics_output is not None:
+        #         precision, recall, AP, f1, ap_class = metrics_output
+        #         evaluation_metrics = [
+        #             ("validation/precision", precision.mean()),
+        #             ("validation/recall", recall.mean()),
+        #             ("validation/mAP", AP.mean()),
+        #             ("validation/f1", f1.mean())]
+        #         logger.list_of_scalars_summary(evaluation_metrics, epoch)
 
 
 if __name__ == "__main__":
