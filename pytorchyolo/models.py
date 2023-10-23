@@ -12,6 +12,14 @@ import torch.nn.functional as F
 from pytorchyolo.utils.parse_config import parse_model_config
 from pytorchyolo.utils.utils import weights_init_normal
 
+class ResidualLayer(nn.Module):
+    def __init__(self,inChannels):
+        super(ResidualLayer, self).__init__()
+        self.cv1 = nn.Conv2d(inChannels, inChannels//2,kernel_size=1,padding= 0)
+        self.cv2 = nn.Conv2d(inChannels//2, inChannels,kernel_size=3,padding= 1)
+        self.reseblock = nn.Sequential(self.cv1,self.cv2)
+    def forward(self, x):
+        return x+self.reseblock(x)
 
 def create_modules(module_defs: List[dict]) -> Tuple[dict, nn.ModuleList]:
     """
@@ -21,6 +29,8 @@ def create_modules(module_defs: List[dict]) -> Tuple[dict, nn.ModuleList]:
     :return: Hyperparameters and pytorch module list
     """
     hyperparams = module_defs.pop(0)
+    if 'ncls' in hyperparams:
+        hyperparams.update({'ncls': int(hyperparams['ncls'])})
     hyperparams.update({
         'batch': int(hyperparams['batch']),
         'subdivisions': int(hyperparams['subdivisions']),
@@ -71,6 +81,8 @@ def create_modules(module_defs: List[dict]) -> Tuple[dict, nn.ModuleList]:
                 modules.add_module(f"sigmoid_{module_i}", nn.Sigmoid())
             elif module_def["activation"] == "swish":
                 modules.add_module(f"swish_{module_i}", nn.SiLU())
+            elif module_def["activation"] == "ReLU":
+                modules.add_module(f"swish_{module_i}", nn.ReLU())
 
         elif module_def["type"] == "maxpool":
             kernel_size = int(module_def["size"])
@@ -80,6 +92,16 @@ def create_modules(module_defs: List[dict]) -> Tuple[dict, nn.ModuleList]:
             maxpool = nn.MaxPool2d(kernel_size=kernel_size, stride=stride,
                                    padding=int((kernel_size - 1) // 2))
             modules.add_module(f"maxpool_{module_i}", maxpool)
+
+#########################################################################
+        elif module_def["type"] == "reslayer":
+            reslayer = ResidualLayer(inChannels=int(module_def["filters"]))
+            modules.add_module(f"reslayer_{module_i}", reslayer)
+        elif module_def["type"] == "conv_obst":
+            # import pdb; pdb.set_trace()
+            conv_obst = nn.Sequential(nn.Conv2d(128, hyperparams['ncls']*5, 3),torch.nn.AdaptiveAvgPool2d(1))
+            modules.add_module(f"conv_obst_{module_i}", conv_obst)
+#########################################################################
 
         elif module_def["type"] == "upsample":
             upsample = Upsample(scale_factor=int(module_def["stride"]), mode="nearest")
@@ -202,6 +224,9 @@ class Darknet(nn.Module):
         self.seen = 0
         self.header_info = np.array([0, 0, 0, self.seen, 0], dtype=np.int32)
 
+
+        #
+
     def forward(self, x):
         img_size = x.size(2)
         layer_outputs, yolo_outputs = [], []
@@ -219,6 +244,12 @@ class Darknet(nn.Module):
             elif module_def["type"] == "yolo":
                 x = module[0](x, img_size)
                 yolo_outputs.append(x)
+###################################################
+            elif module_def["type"] == "conv_obst":
+                x = module(x)
+                y = x.reshape(x.size(0),self.hyperparams['ncls'],5)
+                yolo_outputs.append(y)
+###################################################
             layer_outputs.append(x)
         return yolo_outputs if self.training else torch.cat(yolo_outputs, 1)
 
