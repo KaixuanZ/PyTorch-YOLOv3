@@ -54,6 +54,24 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=
     else:
         return iou  # IoU
 
+def my_loss(predictions, targets):
+    xyhw_pred = predictions[0][...,:4]
+    conf_pred = predictions[0][...,4]
+
+    xyhw_true = targets[:,2:]
+    cls_true = targets[:,1]
+
+    loss_box = xyhw_pred[:,cls_true.long()] - xyhw_true
+    loss_box = (loss_box**2).sum()
+
+    row_idx = torch.tensor([0]*predictions[0].shape[1])
+    for i in cls_true.long():
+        row_idx[i] = 1
+    loss_conf = torch.sum((1-conf_pred[:,row_idx.bool()])**2) + torch.sum(conf_pred[:,~row_idx.bool()]**2)
+    # Merge losses
+    loss = loss_box + loss_conf
+
+    return loss, to_cpu(torch.stack((loss_box, loss_conf, loss_conf, loss)))
 
 def compute_loss(predictions, targets, model):
     # Check which device was used
